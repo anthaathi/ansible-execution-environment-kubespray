@@ -13,6 +13,6 @@ dependencies:
   ansible_runner:
     package_pip: ansible-runner
   system: 
-    - ssh-agent
+    - openssh-clients
 options:
   package_manager_path: /usr/bin/microdnf
