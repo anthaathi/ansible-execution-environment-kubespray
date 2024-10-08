@@ -9,7 +9,7 @@ on:
 
 env:
   GROUP: ${{ github.repository_owner }}
-  REPO: ${{ github.repository.name }}
+  REPO: kubespray-ansible-execution-environment
 
 jobs:
   build-and-push:
