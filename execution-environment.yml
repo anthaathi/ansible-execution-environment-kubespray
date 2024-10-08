@@ -1,0 +1,16 @@
+---
+version: 3
+images:
+  base_image:
+    name: rockylinux:9.3-minimal
+dependencies:
+  python: requirements.txt
+  python_interpreter:
+    package_system: python3.12
+    python_path: /usr/bin/python3.12
+  ansible_core:
+    package_pip: ansible-core
+  ansible_runner:
+    package_pip: ansible-runner
+options:
+  package_manager_path: /usr/bin/microdnf
