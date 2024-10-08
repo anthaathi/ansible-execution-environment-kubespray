@@ -1,42 +1,64 @@
-name: Build and Push Ansible Builder Image
+name: Check for New Releases and Update
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:
-
-env:
-  GROUP: ${{ github.repository_owner }}
-  REPO: kubespray-ansible-execution-environment
+  schedule:
+    - cron: '0 */2 * * *'  # Run every 2 hours
+  workflow_dispatch:  # Allow manual triggering
 
 jobs:
-  build-and-push:
+  check-and-update:
     runs-on: ubuntu-latest
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Get latest release
+      id: get_release
+      uses: octokit/request-action@v2.x
       with:
-        python-version: '3.x'
+        route: GET /repos/${{ github.repository }}/releases/latest
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Install ansible-builder
+    - name: Check for new release
+      id: check_release
       run: |
-        python -m pip install --upgrade pip
-        pip install ansible-builder
+        LATEST_RELEASE=$(echo '${{ steps.get_release.outputs.data }}' | jq -r .tag_name)
+        echo "Latest release: $LATEST_RELEASE"
+        echo "latest_release=$LATEST_RELEASE" >> $GITHUB_OUTPUT
 
-    - name: Log in to GitHub Container Registry
-      uses: docker/login-action@v3
+    - name: Update requirements.txt
+      if: steps.check_release.outputs.latest_release != ''
+      run: |
+        # Add your logic here to update requirements.txt
+        # For example, you might want to download a file from the release and overwrite requirements.txt
+        # Or you might want to make some modifications to the existing requirements.txt
+
+    - name: Commit and push if changed
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add requirements.txt
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Update requirements.txt for release ${{ steps.check_release.outputs.latest_release }}" && git push)
+
+    - name: Trigger Build and Push workflow
+      if: steps.check_release.outputs.latest_release != ''
+      uses: benc-uk/workflow-dispatch@v1
       with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+        workflow: Build and Push Ansible Builder Image
+        token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Build and push image
+    - name: Wait for Build and Push workflow to complete
+      if: steps.check_release.outputs.latest_release != ''
+      uses: fountainhead/action-wait-for-check@v1.1.0
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        checkName: build-and-push
+        ref: ${{ github.ref }}
+
+    - name: Create tag
+      if: steps.check_release.outputs.latest_release != ''
       run: |
-        ansible-builder build --verbosity 3 -t ghcr.io/${{ env.GROUP }}/${{ env.REPO }} --container-runtime docker
-        docker push ghcr.io/${{ env.GROUP }}/${{ env.REPO }}
+        git tag ${{ steps.check_release.outputs.latest_release }}
+        git push origin ${{ steps.check_release.outputs.latest_release }}
