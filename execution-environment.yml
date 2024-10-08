@@ -12,5 +12,7 @@ dependencies:
     package_pip: ansible-core
   ansible_runner:
     package_pip: ansible-runner
+  system: 
+    - ssh-agent
 options:
   package_manager_path: /usr/bin/microdnf
