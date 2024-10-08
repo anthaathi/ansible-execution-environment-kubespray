@@ -1,64 +1,51 @@
-name: Check for New Releases and Update
+name: Build and Push Kubespray Ansible Builder Image
 
 on:
-  schedule:
-    - cron: '0 */2 * * *'  # Run every 2 hours
-  workflow_dispatch:  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Kubespray release version or commit SHA'
+        required: true
+        type: string
+
+env:
+  GROUP: ${{ github.repository_owner }}
+  REPO: kubespray-ansible-execution-environment
+  KUBESPRAY_REPO: kubernetes-sigs/kubespray
 
 jobs:
-  check-and-update:
+  build-and-push:
     runs-on: ubuntu-latest
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Get latest release
-      id: get_release
-      uses: octokit/request-action@v2.x
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        route: GET /repos/${{ github.repository }}/releases/latest
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        python-version: '3.x'
 
-    - name: Check for new release
-      id: check_release
+    - name: Install ansible-builder
       run: |
-        LATEST_RELEASE=$(echo '${{ steps.get_release.outputs.data }}' | jq -r .tag_name)
-        echo "Latest release: $LATEST_RELEASE"
-        echo "latest_release=$LATEST_RELEASE" >> $GITHUB_OUTPUT
+        python -m pip install --upgrade pip
+        pip install ansible-builder
 
-    - name: Update requirements.txt
-      if: steps.check_release.outputs.latest_release != ''
+    - name: Download Kubespray files
       run: |
-        # Add your logic here to update requirements.txt
-        # For example, you might want to download a file from the release and overwrite requirements.txt
-        # Or you might want to make some modifications to the existing requirements.txt
+        mkdir -p kubespray
+        cd kubespray
+        curl -L https://github.com/${{ env.KUBESPRAY_REPO }}/archive/${{ github.event.inputs.version }}.tar.gz | tar xz --strip-components=1
+        cp requirements.txt ../
 
-    - name: Commit and push if changed
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add requirements.txt
-        git diff --quiet && git diff --staged --quiet || (git commit -m "Update requirements.txt for release ${{ steps.check_release.outputs.latest_release }}" && git push)
-
-    - name: Trigger Build and Push workflow
-      if: steps.check_release.outputs.latest_release != ''
-      uses: benc-uk/workflow-dispatch@v1
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
       with:
-        workflow: Build and Push Ansible Builder Image
-        token: ${{ secrets.GITHUB_TOKEN }}
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Wait for Build and Push workflow to complete
-      if: steps.check_release.outputs.latest_release != ''
-      uses: fountainhead/action-wait-for-check@v1.1.0
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        checkName: build-and-push
-        ref: ${{ github.ref }}
-
-    - name: Create tag
-      if: steps.check_release.outputs.latest_release != ''
+    - name: Build and push image
       run: |
-        git tag ${{ steps.check_release.outputs.latest_release }}
-        git push origin ${{ steps.check_release.outputs.latest_release }}
+        ansible-builder build --verbosity 3 -t ghcr.io/${{ env.GROUP }}/${{ env.REPO }}:${{ github.event.inputs.version }} --container-runtime docker
+        docker push ghcr.io/${{ env.GROUP }}/${{ env.REPO }}:${{ github.event.inputs.version }}
